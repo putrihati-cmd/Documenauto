@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # -----------------------------------------------------------------
+  # DATA LAYER
+  # -----------------------------------------------------------------
+  postgres:
+    image: postgres:15-alpine
+    container_name: smartcopy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-smartcopy}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-smartcopy_secret}
+      POSTGRES_DB: ${DB_NAME:-smartcopy_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - smartcopy-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartcopy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: smartcopy-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - smartcopy-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------------
+  # APPLICATION LAYER
+  # -----------------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: smartcopy-backend
+    restart: unless-stopped
+    ports:
+      - "3003:3001" # Host:Container (Avoid 3000 conflict)
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=postgres://${DB_USER:-smartcopy}:${DB_PASSWORD:-smartcopy_secret}@postgres:5432/${DB_NAME:-smartcopy_db}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - smartcopy-network
+    volumes:
+      - ./storage:/app/storage
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: smartcopy-frontend
+    restart: unless-stopped
+    ports:
+      - "3002:80" # Host:Container
+    depends_on:
+      - backend
+    networks:
+      - smartcopy-network
+
+  # -----------------------------------------------------------------
+  # WORKER LAYER
+  # -----------------------------------------------------------------
+  processing-engine:
+    build:
+      context: ./processing-engine
+      dockerfile: Dockerfile
+    container_name: smartcopy-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgres://${DB_USER:-smartcopy}:${DB_PASSWORD:-smartcopy_secret}@postgres:5432/${DB_NAME:-smartcopy_db}
+    depends_on:
+      - redis
+      - postgres
+      - backend
+    networks:
+      - smartcopy-network
+    volumes:
+      - ./storage:/app/storage
+
+  whatsapp-bot:
+    build:
+      context: ./whatsapp-bot
+      dockerfile: Dockerfile
+    container_name: smartcopy-bot
+    restart: unless-stopped
+    environment:
+      - API_URL=http://backend:3001
+    depends_on:
+      - backend
+    networks:
+      - smartcopy-network
+    volumes:
+      - ./whatsapp-auth:/app/auth_info
+
+networks:
+  smartcopy-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
