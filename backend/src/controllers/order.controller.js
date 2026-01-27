@@ -97,11 +97,47 @@ const createOrder = async (req, res) => {
     // In production, save to database:
     // const savedOrder = await Order.create(order);
 
+const { addToQueue } = require('../utils/queue');
+const { getTemplate } = require('./template.controller'); // We need to import the template helper or logic
+const path = require('path');
+
+// ... (existing code)
+
     // For now, log and return
     console.log('New order created:', order);
 
-    // TODO: Add to Redis queue for processing
-    // await addToQueue(order);
+    // ---------------------------------------------------------
+    // DISPATCH JOB TO PYTHON WORKER
+    // ---------------------------------------------------------
+    // Determine the reference template path
+    let referencePath = documentType; // Default (if string)
+
+    // typically documentType from OrderForm is now "skripsi" or "makalah" OR a numeric ID
+    // We need to resolve the path if it's a specific ID
+    // For MVP: Assuming `documentType` holds the category or ID.
+
+    // Better Logic:
+    // If the OrderForm sends `templateId` (added recently), use that.
+    const templateId = req.body.templateId;
+    
+    // Construct absolute path for Docker volume
+    const inputPath = `/app/storage/uploads/${req.file.filename}`;
+    const outputPath = `/app/storage/processed/${orderId}-formatted.docx`;
+    
+    // Ensure output directory makes sense or is pre-created by worker
+    // Worker typically handles output creation.
+
+    const jobPayload = {
+      id: orderId,
+      type: 'format',
+      input: inputPath,
+      ref: templateId ? `TEMPLATE:${templateId}` : `CATEGORY:${documentType}`, // Worker needs to resolve this
+      output: outputPath
+    };
+
+    await addToQueue(jobPayload);
+    console.log(">> Job Dispatched to Redis:", jobPayload);
+
 
     return res.status(201).json({
       success: true,
