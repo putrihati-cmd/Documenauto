@@ -1,6 +1,8 @@
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
+const sequelize = require('../config/database');
+const { QueryTypes } = require('sequelize');
 
 // Configure multer for payment proof uploads
 const paymentProofStorage = multer.diskStorage({
@@ -36,64 +38,15 @@ const uploadPaymentProof = multer({
 // Get token packages
 const getPackages = async (req, res) => {
   try {
-    // In production, fetch from database:
-    // const packages = await TokenPackage.findAll({ where: { is_active: true } });
+    const packages = await sequelize.query(
+      'SELECT * FROM token_packages WHERE is_active = true ORDER BY price ASC',
+      { type: QueryTypes.SELECT }
+    );
     
-    const packages = [
-      {
-        id: 1,
-        name: 'Starter Pack',
-        token_amount: 10,
-        bonus_tokens: 0,
-        price: 10000,
-        discount_percentage: 0,
-        valid_days: 90,
-        is_popular: false,
-        description: 'Perfect for trying out the service'
-      },
-      {
-        id: 2,
-        name: 'Student Pack',
-        token_amount: 50,
-        bonus_tokens: 5,
-        price: 40000,
-        original_price: 50000,
-        discount_percentage: 20,
-        valid_days: 180,
-        is_popular: true,
-        description: 'Most popular! Great for 1 skripsi + revisions'
-      },
-      {
-        id: 3,
-        name: 'Pro Pack',
-        token_amount: 100,
-        bonus_tokens: 15,
-        price: 70000,
-        original_price: 100000,
-        discount_percentage: 30,
-        valid_days: 365,
-        is_popular: false,
-        description: 'Best value for multiple documents'
-      },
-      {
-        id: 4,
-        name: 'Mega Pack',
-        token_amount: 300,
-        bonus_tokens: 50,
-        price: 180000,
-        original_price: 300000,
-        discount_percentage: 40,
-        valid_days: null,
-        is_popular: false,
-        description: 'For power users and resellers'
-      }
-    ];
-
     return res.status(200).json({
       success: true,
       data: packages
     });
-
   } catch (error) {
     console.error('Error getting packages:', error);
     return res.status(500).json({
@@ -106,45 +59,15 @@ const getPackages = async (req, res) => {
 // Get payment methods
 const getPaymentMethods = async (req, res) => {
   try {
-    // In production, fetch from database:
-    // const methods = await PaymentMethod.findAll({ where: { is_active: true } });
-
-    const methods = [
-      {
-        id: 1,
-        method_type: 'bank_transfer',
-        bank_name: 'BCA',
-        account_number: '1234567890',
-        account_name: 'SmartCopy Print',
-        instructions: 'Transfer ke rekening BCA, lalu upload bukti transfer'
-      },
-      {
-        id: 2,
-        method_type: 'bank_transfer',
-        bank_name: 'Mandiri',
-        account_number: '0987654321',
-        account_name: 'SmartCopy Print',
-        instructions: 'Transfer ke rekening Mandiri, lalu upload bukti transfer'
-      },
-      {
-        id: 3,
-        method_type: 'qris',
-        qris_merchant_name: 'SmartCopy Toko',
-        qris_image_url: '/static/qris-smartcopy.png',
-        instructions: 'Scan QRIS dan upload bukti pembayaran'
-      },
-      {
-        id: 4,
-        method_type: 'cash',
-        instructions: 'Datang ke toko SmartCopy di Jl. Contoh No. 123'
-      }
-    ];
+    const methods = await sequelize.query(
+      'SELECT * FROM payment_methods WHERE is_active = true ORDER BY id ASC',
+      { type: QueryTypes.SELECT }
+    );
 
     return res.status(200).json({
       success: true,
       data: methods
     });
-
   } catch (error) {
     console.error('Error getting payment methods:', error);
     return res.status(500).json({
@@ -158,7 +81,7 @@ const getPaymentMethods = async (req, res) => {
 const createPaymentOrder = async (req, res) => {
   try {
     const { package_id, payment_method } = req.body;
-    const user_id = req.user?.id || 1; // From auth middleware
+    const user_id = req.user?.id || 1; // Default to ID 1 if auth missing
 
     if (!package_id || !payment_method) {
       return res.status(400).json({
@@ -168,15 +91,16 @@ const createPaymentOrder = async (req, res) => {
     }
 
     // Get package details
-    // In production: const package = await TokenPackage.findByPk(package_id);
-    const packages = {
-      1: { token_amount: 10, bonus_tokens: 0, price: 10000 },
-      2: { token_amount: 50, bonus_tokens: 5, price: 40000 },
-      3: { token_amount: 100, bonus_tokens: 15, price: 70000 },
-      4: { token_amount: 300, bonus_tokens: 50, price: 180000 }
-    };
+    const packages = await sequelize.query(
+      'SELECT * FROM token_packages WHERE id = :id',
+      { 
+        replacements: { id: package_id },
+        type: QueryTypes.SELECT 
+      }
+    );
     
-    const selectedPackage = packages[package_id];
+    const selectedPackage = packages[0];
+
     if (!selectedPackage) {
       return res.status(404).json({
         success: false,
@@ -191,22 +115,39 @@ const createPaymentOrder = async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
 
-    // Create payment order
-    const paymentOrder = {
-      order_number: orderNumber,
-      user_id,
-      package_id,
-      token_amount: selectedPackage.token_amount,
-      bonus_tokens: selectedPackage.bonus_tokens,
-      total_tokens: selectedPackage.token_amount + selectedPackage.bonus_tokens,
-      price: selectedPackage.price,
-      payment_method,
-      status: 'pending',
-      expires_at: expiresAt.toISOString(),
-      created_at: new Date().toISOString()
-    };
+    // Prepare data
+    const token_amount = selectedPackage.token_amount;
+    const bonus_tokens = selectedPackage.bonus_tokens;
+    const total_tokens = token_amount + bonus_tokens;
+    const price = selectedPackage.price;
 
-    // In production: await PaymentOrder.create(paymentOrder);
+    // Insert into payment_orders
+    const [result] = await sequelize.query(
+      `INSERT INTO payment_orders 
+       (order_number, user_id, package_id, token_amount, bonus_tokens, total_tokens, price, payment_method, status, expires_at) 
+       VALUES (:order_number, :user_id, :package_id, :token_amount, :bonus_tokens, :total_tokens, :price, :payment_method, 'pending', :expires_at) 
+       RETURNING *`,
+      {
+        replacements: {
+          order_number: orderNumber,
+          user_id,
+          package_id,
+          token_amount,
+          bonus_tokens,
+          total_tokens,
+          price,
+          payment_method,
+          expires_at: expiresAt
+        },
+        type: QueryTypes.INSERT
+      }
+    );
+
+    // Note: Sequelize raw insert returns [results, metadata] or just results depending on dialect
+    // For Postgres with RETURNING, result[0] is usually the row.
+    // Let's assume result[0] is the object.
+    
+    const paymentOrder = result[0];
 
     console.log('Payment order created:', paymentOrder);
 
@@ -246,14 +187,45 @@ const uploadProof = async (req, res) => {
       transfer_amount: parseFloat(transfer_amount),
       transfer_date: transfer_date || new Date().toISOString(),
       transfer_notes,
-      status: 'paid',
+      status: 'paid', // Changed to 'paid' so admin can verify
       updated_at: new Date().toISOString()
     };
+    
+    // Update DB
+    const [results] = await sequelize.query(
+      `UPDATE payment_orders 
+       SET payment_proof_path = :path, 
+           payment_proof_url = :url, 
+           transfer_amount = :amount, 
+           transfer_date = :date, 
+           transfer_notes = :notes, 
+           status = 'paid', 
+           updated_at = NOW() 
+       WHERE id = :id 
+       RETURNING *`,
+       { 
+         replacements: { 
+           path: req.file.path,
+           url: `/uploads/payment-proofs/${req.file.filename}`,
+           amount: parseFloat(transfer_amount),
+           date: transfer_date || new Date().toISOString(),
+           notes: transfer_notes || '',
+           id: order_id
+         }, 
+         type: QueryTypes.UPDATE 
+       }
+    );
+     
+    if (!results || results.length === 0) {
+        return res.status(404).json({
+            success: false,
+            message: 'Order not found'
+        });
+    }
 
-    // In production:
-    // await PaymentOrder.update(updateData, { where: { id: order_id } });
+    const updatedOrder = results[0];
 
-    console.log(`Payment proof uploaded for order ${order_id}:`, updateData);
+    console.log(`Payment proof uploaded for order ${order_id}:`, updatedOrder);
 
     return res.status(200).json({
       success: true,
@@ -277,46 +249,24 @@ const getUserPaymentOrders = async (req, res) => {
     const user_id = req.user?.id || 1;
     const { status } = req.query;
 
-    // In production:
-    // const where = { user_id };
-    // if (status) where.status = status;
-    // const orders = await PaymentOrder.findAll({ where });
-
-    // Mock data
-    const mockOrders = [
-      {
-        id: 1,
-        order_number: 'PAY-20260127-0001',
-        token_amount: 50,
-        bonus_tokens: 5,
-        total_tokens: 55,
-        price: 40000,
-        payment_method: 'bank_transfer',
-        status: 'completed',
-        created_at: '2026-01-26T10:00:00Z',
-        verified_at: '2026-01-26T11:00:00Z'
-      },
-      {
-        id: 2,
-        order_number: 'PAY-20260127-0002',
-        token_amount: 10,
-        bonus_tokens: 0,
-        total_tokens: 10,
-        price: 10000,
-        payment_method: 'qris',
-        status: 'pending',
-        created_at: '2026-01-27T09:00:00Z',
-        expires_at: '2026-01-28T09:00:00Z'
-      }
-    ];
-
-    const filteredOrders = status 
-      ? mockOrders.filter(o => o.status === status)
-      : mockOrders;
+    let query = 'SELECT * FROM payment_orders WHERE user_id = :uid';
+    const replacements = { uid: user_id };
+    
+    if (status) {
+        query += ' AND status = :status';
+        replacements.status = status;
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const orders = await sequelize.query(query, {
+        replacements,
+        type: QueryTypes.SELECT
+    });
 
     return res.status(200).json({
       success: true,
-      data: filteredOrders
+      data: orders
     });
 
   } catch (error) {
@@ -331,34 +281,24 @@ const getUserPaymentOrders = async (req, res) => {
 // STAFF ONLY: Get pending payment orders
 const getPendingPayments = async (req, res) => {
   try {
-    // In production:
-    // const orders = await PaymentOrder.findAll({ 
-    //   where: { status: 'paid' },
-    //   include: [{ model: User, attributes: ['email', 'full_name'] }]
-    // });
-
-    const mockPendingOrders = [
-      {
-        id: 3,
-        order_number: 'PAY-20260127-0003',
-        user: {
-          email: 'student@university.ac.id',
-          full_name: 'Ahmad Student'
-        },
-        token_amount: 50,
-        price: 40000,
-        payment_method: 'bank_transfer',
-        payment_proof_url: '/uploads/payment-proofs/proof_123.jpg',
-        transfer_amount: 40000,
-        transfer_date: '2026-01-27T08:00:00Z',
-        status: 'paid',
-        created_at: '2026-01-27T07:00:00Z'
-      }
-    ];
+    const orders = await sequelize.query(
+        `SELECT po.*, u.name as user_name, u.email as user_email 
+            FROM payment_orders po 
+            LEFT JOIN users u ON po.user_id = u.id 
+            WHERE po.status = 'paid' 
+            ORDER BY po.updated_at ASC`,
+        { type: QueryTypes.SELECT }
+    );
+    
+    // Transform to match frontend expectation
+    const formatted = orders.map(o => ({
+        ...o,
+        user: { email: o.user_email, full_name: o.user_name || 'Unknown' }
+    }));
 
     return res.status(200).json({
       success: true,
-      data: mockPendingOrders
+      data: formatted
     });
 
   } catch (error) {
@@ -384,66 +324,91 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    // Get payment order
-    // In production: const order = await PaymentOrder.findByPk(order_id);
+    // Start Transaction
+    const t = await sequelize.transaction();
 
-    if (action === 'approve') {
-      // Update order status
-      const updateData = {
-        status: 'completed',
-        verified_by: staff_id,
-        verified_at: new Date().toISOString(),
-        verification_notes: notes
-      };
+    try {
+        // Get payment order
+        const [orders] = await sequelize.query(
+            'SELECT * FROM payment_orders WHERE id = :id',
+            { 
+                replacements: { id: order_id },
+                type: QueryTypes.SELECT,
+                transaction: t
+            }
+        );
+        
+        const order = orders[0];
+        if (!order) {
+            await t.rollback();
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
 
-      // Credit tokens to user
-      const tokenAmount = 55; // order.total_tokens
-      const userId = 1; // order.user_id
+        if (action === 'approve') {
+            // 1. Update Order Status
+            await sequelize.query(
+                "UPDATE payment_orders SET status = 'completed', verified_by = :staff, verified_at = NOW(), verification_notes = :notes WHERE id = :id",
+                {
+                    replacements: { staff: staff_id, notes: notes || '', id: order_id },
+                    transaction: t
+                }
+            );
 
-      // Create token transaction
-      const transaction = {
-        user_id: userId,
-        amount: tokenAmount,
-        balance_before: 10, // current balance
-        balance_after: 10 + tokenAmount,
-        transaction_type: 'purchase',
-        description: `Token purchase approved - Order ${order_id}`,
-        payment_order_id: order_id,
-        created_at: new Date().toISOString()
-      };
+            // 2. Credit Tokens to User
+            await sequelize.query(
+                "UPDATE users SET token_balance = COALESCE(token_balance, 0) + :amount WHERE id = :uid",
+                {
+                    replacements: { amount: order.total_tokens, uid: order.user_id },
+                    transaction: t
+                }
+            );
 
-      // In production:
-      // await PaymentOrder.update(updateData, { where: { id: order_id } });
-      // await TokenTransaction.create(transaction);
+            // 3. Create Token Transaction Record
+            await sequelize.query(
+                `INSERT INTO token_transactions 
+                 (user_id, amount, balance_before, balance_after, transaction_type, description, payment_order_id, created_at)
+                 VALUES 
+                 (:uid, :amount, (SELECT token_balance - :amount FROM users WHERE id = :uid), (SELECT token_balance FROM users WHERE id = :uid), 'purchase', :desc, :oid, NOW())`,
+                 {
+                    replacements: {
+                        uid: order.user_id,
+                        amount: order.total_tokens,
+                        desc: `Token purchase approved - Order ${order.order_number}`,
+                        oid: order_id
+                    },
+                    transaction: t
+                 }
+            );
 
-      console.log('Payment approved:', updateData);
-      console.log('Tokens credited:', transaction);
+            await t.commit();
+            
+            return res.status(200).json({
+                success: true,
+                message: 'Payment approved and tokens credited',
+                data: { tokens_credited: order.total_tokens }
+            });
 
-      return res.status(200).json({
-        success: true,
-        message: 'Payment approved and tokens credited',
-        data: { tokens_credited: tokenAmount }
-      });
+        } else { // Reject
+            await sequelize.query(
+                "UPDATE payment_orders SET status = 'rejected', verified_by = :staff, verified_at = NOW(), rejection_reason = :notes WHERE id = :id",
+                {
+                    replacements: { staff: staff_id, notes: notes || '', id: order_id },
+                    transaction: t
+                }
+            );
+            
+            await t.commit();
 
-    } else {
-      // Reject payment
-      const updateData = {
-        status: 'rejected',
-        verified_by: staff_id,
-        verified_at: new Date().toISOString(),
-        rejection_reason: notes
-      };
+            return res.status(200).json({
+                success: true,
+                message: 'Payment rejected',
+                data: { status: 'rejected' }
+            });
+        }
 
-      // In production:
-      // await PaymentOrder.update(updateData, { where: { id: order_id } });
-
-      console.log('Payment rejected:', updateData);
-
-      return res.status(200).json({
-        success: true,
-        message: 'Payment rejected',
-        data: updateData
-      });
+    } catch (err) {
+        await t.rollback();
+        throw err;
     }
 
   } catch (error) {

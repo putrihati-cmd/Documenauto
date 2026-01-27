@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { Sequelize } = require('sequelize');
+// const { Sequelize } = require('sequelize'); // Moved to config/database.js
 const redis = require('redis');
 const path = require('path');
 
@@ -17,10 +17,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'storage/uploads')));
 
 // Database Connection
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
-    dialect: 'postgres',
-    logging: false,
-});
+const sequelize = require('./src/config/database');
 
 // Redis Connection
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
