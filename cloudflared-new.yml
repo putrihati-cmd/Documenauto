@@ -1,0 +1,39 @@
+tunnel: 54ccd966-5b4c-4c0c-85ae-805e1fb20cfb
+credentials-file: /etc/cloudflared/54ccd966-5b4c-4c0c-85ae-805e1fb20cfb.json
+
+ingress:
+  - hostname: hscopycenter.site
+    service: http://localhost:8081
+
+  - hostname: www.hscopycenter.site
+    service: http://localhost:8081
+
+  # POS Publik + Admin (Full Web Access)
+  - hostname: kasir.hscopycenter.site
+    service: http://localhost:80
+
+  # API Only untuk Mobile APK (Web blocked by middleware)
+  - hostname: produk.hscopycenter.site
+    service: http://localhost:80
+
+  # Webhook QRIS
+  - hostname: pos.hscopycenter.site
+    service: http://localhost:80
+
+  # N8N Workflow
+  - hostname: n8n.hscopycenter.site
+    service: http://localhost:5678
+
+  # WhatsApp Gateway
+  - hostname: waha.hscopycenter.site
+    service: http://localhost:3000
+
+  # Cetak Foto App
+  - hostname: cetakfoto.hscopycenter.site
+    service: http://localhost:80
+
+  # Dokumen / Skripsi App
+  - hostname: dokumen.hscopycenter.site
+    service: http://localhost:3002
+
+  - service: http_status:404
