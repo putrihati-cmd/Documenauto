@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { FileText, Check, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
+import { FileText, Check, ArrowLeft, Loader2, AlertCircle, Split } from 'lucide-react';
+import ErrorBoundary from './ErrorBoundary';
 
 const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -10,49 +11,54 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
 
   // Generate preview URL for the file
   useEffect(() => {
-    if (file) {
-      // PDF or Image
-      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
-         const url = URL.createObjectURL(file);
-         setPreviewUrl(url);
-         return () => URL.revokeObjectURL(url);
-      }
-      
-      // DOCX Preview
-      if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-         setIsRendering(true);
-         setPreviewError(false);
-         
-         const reader = new FileReader();
-         reader.onload = async (e) => {
-           const buffer = e.target.result;
-           const container = document.getElementById('docx-container');
-           if (container) {
-             try {
-                // Dynamic import to avoid top-level crashes and reduce bundle size
-                const { renderAsync } = await import('docx-preview');
-                
-                // Clear previous content but keep loader if needed (though we handle isRendering)
-                container.innerHTML = ''; 
-                await renderAsync(buffer, container, null, {
-                  className: 'docx-viewer',
-                  inWrapper: false,
-                  ignoreWidth: false,
-                  ignoreHeight: false
-                });
-             } catch (err) {
-                console.error("DOCX Preview Error:", err);
-                setPreviewError(true);
-             } finally {
-                setIsRendering(false);
-             }
-           }
-         };
-         reader.readAsArrayBuffer(file);
-      }
+    if (!file) return;
+
+    let objectUrl = null;
+
+    // PDF or Image
+    if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+       objectUrl = URL.createObjectURL(file);
+       setPreviewUrl(objectUrl);
     }
+    
+    // DOCX Preview
+    if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+       setIsRendering(true);
+       setPreviewError(false);
+       
+       const reader = new FileReader();
+       reader.onload = async (e) => {
+         const buffer = e.target.result;
+         const container = containerRef.current; // access ref directly
+         
+         if (container) {
+           try {
+              const { renderAsync } = await import('docx-preview');
+              container.innerHTML = ''; 
+              await renderAsync(buffer, container, null, {
+                className: 'docx-viewer',
+                inWrapper: false,
+                ignoreWidth: false,
+                ignoreHeight: false
+              });
+           } catch (err) {
+              console.error("DOCX Preview Error:", err);
+              setPreviewError(true);
+           } finally {
+              setIsRendering(false);
+           }
+         }
+       };
+       reader.readAsArrayBuffer(file);
+    }
+
+    // Cleanup
+    return () => {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [file]);
 
+  // Helper functions for labels
   const getServiceLabel = (value) => {
     const services = {
       'print_only': 'Print Only',
@@ -94,227 +100,162 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
   };
 
   const estimatePrice = () => {
-    // Simple price estimation (this would be calculated by backend in production)
-    let basePrice = 500; // per page
-    
-    if (orderData.serviceLevel === 'format_print') {
-      basePrice = 800;
-    } else if (orderData.serviceLevel === 'edit_print') {
-      basePrice = 1500;
-    }
+    let basePrice = 500;
+    if (orderData.serviceLevel === 'format_print') basePrice = 800;
+    else if (orderData.serviceLevel === 'edit_print') basePrice = 1500;
 
-    if (orderData.colorMode) {
-      basePrice *= 3; // Color is typically 3x more expensive
-    }
+    if (orderData.colorMode) basePrice *= 3;
 
-    // Assume 10 pages for estimation (actual would come from file analysis)
     const estimatedPages = 10;
     let total = basePrice * estimatedPages * orderData.copies;
 
-    // Add binding cost
-    if (orderData.bindingType === 'spiral') {
-      total += 5000 * orderData.copies;
-    } else if (orderData.bindingType === 'hardcover') {
-      total += 15000 * orderData.copies;
-    } else if (orderData.bindingType === 'staple') {
-      total += 1000 * orderData.copies;
-    }
+    if (orderData.bindingType === 'spiral') total += 5000 * orderData.copies;
+    else if (orderData.bindingType === 'hardcover') total += 15000 * orderData.copies;
+    else if (orderData.bindingType === 'staple') total += 1000 * orderData.copies;
 
-    return {
-      estimatedPages,
-      basePrice,
-      total: total.toLocaleString('id-ID')
-    };
+    return { estimatedPages, basePrice, total: total.toLocaleString('id-ID') };
   };
 
   const priceInfo = estimatePrice();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-12 px-6">
-      <div className="max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gray-50 py-8 px-4">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="text-center mb-8">
-          <h2 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">
-            Preview & Konfirmasi
-          </h2>
-          <p className="text-gray-600">Periksa detail order sebelum submit</p>
+        <div className="text-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-900">Review & Konfirmasi</h2>
+          <p className="text-gray-500">Periksa dokumen sebelum diproses</p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Preview Panel */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-2xl shadow-xl p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Preview Dokumen
-              </h3>
-              
-              <div className="border-2 border-gray-200 rounded-lg overflow-hidden bg-gray-50">
-                {file.type === 'application/pdf' ? (
-                  <iframe
-                    src={previewUrl}
-                    className="w-full h-[600px]"
-                    title="PDF Preview"
-                    onError={() => setPreviewError(true)}
-                  />
-                ) : file.type.startsWith('image/') ? (
-                  <img
-                    src={previewUrl}
-                    alt="Document preview"
-                    className="w-full h-auto max-h-[600px] object-contain"
-                    onError={() => setPreviewError(true)}
-                  />
-                ) : file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
-                  <div className="h-[600px] bg-white overflow-auto p-4 custom-scrollbar" id="docx-container">
-                    {/* DOCX will be rendered here */}
-                    {isRendering && (
-                      <div className="flex h-full items-center justify-center">
-                        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-                        <span className="ml-2 text-gray-500">Memuat preview dokumen...</span>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="h-[600px] flex items-center justify-center text-gray-500">
-                    <div className="text-center space-y-3">
-                      <FileText className="w-16 h-16 mx-auto text-gray-400" />
-                      <p className="font-medium">Preview tidak tersedia untuk format ini</p>
-                      <p className="text-sm">File akan diproses setelah submit</p>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* LEFT COLUMN: PREVIEW (BEFORE & AFTER) */}
+          <div className="lg:col-span-8 space-y-6">
+            
+            <ErrorBoundary>
+                {/* BEFORE: Original File */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                        <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+                            <FileText className="w-4 h-4" />
+                            File Asli (Original)
+                        </h3>
+                        <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full">
+                            {file.name}
+                        </span>
                     </div>
-                  </div>
-                )}
-                
-                {previewError && (
-                  <div className="h-[600px] flex items-center justify-center absolute inset-0 bg-white">
-                    <div className="text-center space-y-3">
-                      <AlertCircle className="w-16 h-16 mx-auto text-orange-500" />
-                      <p className="font-medium text-gray-700">Gagal memuat preview</p>
-                      <p className="text-sm text-gray-500">File akan tetap diproses dengan normal</p>
+                    
+                    <div className="relative min-h-[400px] h-[500px] bg-gray-100/50">
+                        {file.type === 'application/pdf' ? (
+                        <iframe src={previewUrl} className="w-full h-full" title="PDF Preview" />
+                        ) : file.type.startsWith('image/') ? (
+                        <img src={previewUrl} alt="Preview" className="w-full h-full object-contain" />
+                        ) : file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
+                        <div ref={containerRef} className="w-full h-full overflow-auto p-8 bg-white" id="docx-container">
+                            {/* DOCX Renders Here */}
+                            {isRendering && (
+                                <div className="flex h-full items-center justify-center">
+                                    <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                                    <span className="ml-2 text-gray-500">Memproses preview...</span>
+                                </div>
+                            )}
+                        </div>
+                        ) : (
+                        <div className="flex h-full items-center justify-center text-gray-400">
+                            Preview tidak tersedia
+                        </div>
+                        )}
+                        
+                        {previewError && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-white/90">
+                                <div className="text-center">
+                                    <AlertCircle className="w-10 h-10 text-red-400 mx-auto mb-2" />
+                                    <p className="text-sm text-gray-500">Gagal memuat preview</p>
+                                </div>
+                            </div>
+                        )}
                     </div>
-                  </div>
-                )}
-              </div>
+                </div>
 
-              <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-800">
-                  <strong>Info:</strong> Preview ini hanya tampilan awal. Tim kami akan memproses dokumen sesuai dengan layanan yang Anda pilih.
-                </p>
-              </div>
-            </div>
+                {/* AFTER: Simulation / Info */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-6">
+                    <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-green-50">
+                        <h3 className="font-semibold text-green-800 flex items-center gap-2">
+                            <Split className="w-4 h-4" />
+                            Hasil Akhir (Estimasi)
+                        </h3>
+                        <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
+                            {getServiceLabel(orderData.serviceLevel)}
+                        </span>
+                    </div>
+                    <div className="p-8 text-center bg-white min-h-[200px] flex flex-col items-center justify-center">
+                         <div className="max-w-md mx-auto">
+                            <div className="flex justify-center gap-4 mb-4 opacity-50">
+                                <FileText className="w-12 h-12 text-gray-300" />
+                                <ArrowLeft className="w-8 h-8 text-gray-300 rotate-180" />
+                                <FileText className="w-12 h-12 text-green-500 border-2 border-green-200 rounded p-1" />
+                            </div>
+                            <h4 className="text-lg font-medium text-gray-800 mb-2">
+                                Formatting Otomatis akan diterapkan
+                            </h4>
+                            <p className="text-sm text-gray-500">
+                                Sistem kami akan merapikan margin, font, dan spasi dokumen Anda secara otomatis setelah order dikonfirmasi.
+                                Anda akan menerima notifikasi WhatsApp saat hasil sudah siap.
+                            </p>
+                         </div>
+                    </div>
+                </div>
+            </ErrorBoundary>
           </div>
 
-          {/* Order Summary Panel */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-2xl shadow-xl p-6 sticky top-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Ringkasan Order
-              </h3>
-
-              <div className="space-y-4 mb-6">
-                {/* File Info */}
-                <div className="pb-4 border-b border-gray-200">
-                  <p className="text-sm text-gray-600 mb-1">File</p>
-                  <p className="font-medium text-gray-900 truncate">{file.name}</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
+          {/* RIGHT COLUMN: SUMMARY */}
+          <div className="lg:col-span-4">
+             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 sticky top-6">
+                <h3 className="font-bold text-gray-900 mb-4">Ringkasan Biaya</h3>
+                
+                <div className="space-y-3 text-sm mb-6">
+                    <div className="flex justify-between py-2 border-b border-dashed">
+                        <span className="text-gray-600">Layanan</span>
+                        <span className="font-medium">{getServiceLabel(orderData.serviceLevel)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-dashed">
+                       <span className="text-gray-600">Jumlah</span>
+                       <span className="font-medium">{orderData.copies} rangkap</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-dashed">
+                       <span className="text-gray-600">Jilid</span>
+                       <span className="font-medium">{getBindingLabel(orderData.bindingType)}</span>
+                    </div>
                 </div>
 
-                {/* Document Type */}
-                <div className="pb-4 border-b border-gray-200">
-                  <p className="text-sm text-gray-600 mb-1">Jenis Dokumen</p>
-                  <p className="font-medium text-gray-900">
-                    {getDocumentTypeLabel(orderData.documentType)}
-                  </p>
+                <div className="bg-blue-50 p-4 rounded-lg mb-6">
+                   <p className="text-xs text-blue-600 mb-1">Estimasi Total</p>
+                   <p className="text-2xl font-bold text-blue-700">Rp {priceInfo.total}</p>
                 </div>
 
-                {/* Service Level */}
-                <div className="pb-4 border-b border-gray-200">
-                  <p className="text-sm text-gray-600 mb-1">Layanan</p>
-                  <p className="font-medium text-gray-900">
-                    {getServiceLabel(orderData.serviceLevel)}
-                  </p>
-                </div>
-
-                {/* Specifications */}
-                <div className="space-y-2 pb-4 border-b border-gray-200">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Jumlah:</span>
-                    <span className="font-medium">{orderData.copies} eksemplar</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Jilid:</span>
-                    <span className="font-medium">{getBindingLabel(orderData.bindingType)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Warna:</span>
-                    <span className="font-medium">
-                      {orderData.colorMode ? 'Full Color' : 'Hitam Putih'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Price Estimate */}
-                <div className="p-4 bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg">
-                  <p className="text-sm text-gray-600 mb-2">Estimasi Harga</p>
-                  <p className="text-xs text-gray-500 mb-2">
-                    ~{priceInfo.estimatedPages} halaman × Rp {priceInfo.basePrice.toLocaleString('id-ID')}
-                  </p>
-                  <p className="text-2xl font-bold text-blue-600">
-                    Rp {priceInfo.total}
-                  </p>
-                  <p className="text-xs text-gray-500 mt-2">
-                    *Harga final akan dikonfirmasi setelah review
-                  </p>
-                </div>
-
-                {/* Notes */}
-                {orderData.notes && (
-                  <div className="pb-4 border-b border-gray-200">
-                    <p className="text-sm text-gray-600 mb-1">Catatan</p>
-                    <p className="text-sm text-gray-700 italic">"{orderData.notes}"</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="space-y-3">
                 <button
                   onClick={handleSubmit}
                   disabled={isSubmitting}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium shadow-lg shadow-blue-200 transition-all flex items-center justify-center gap-2 mb-3 disabled:opacity-70"
                 >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                      Mengirim...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-5 h-5" />
-                      Konfirmasi Order
-                    </>
-                  )}
+                  {isSubmitting ? <Loader2 className="animate-spin w-5 h-5" /> : <Check className="w-5 h-5" />}
+                  Konfirmasi & Bayar
                 </button>
 
                 <button
                   onClick={onBack}
                   disabled={isSubmitting}
-                  className="w-full flex items-center justify-center gap-2 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-all disabled:opacity-50"
+                  className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50 transition-all"
                 >
-                  <ArrowLeft className="w-5 h-5" />
                   Kembali
                 </button>
-              </div>
 
-              {/* Security Note */}
-              <div className="mt-4 p-3 bg-green-50 rounded-lg border border-green-200">
-                <p className="text-xs text-green-800 text-center">
-                  🔒 Dokumen Anda aman dan terlindungi
+                <p className="text-xs text-center text-gray-400 mt-4">
+                    Data Anda dienkripsi dan aman.
                 </p>
-              </div>
-            </div>
+             </div>
           </div>
+
         </div>
       </div>
     </div>
