@@ -1,19 +1,53 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FileText, Check, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
+import { renderAsync } from 'docx-preview';
 
 const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewError, setPreviewError] = useState(false);
+  const [isRendering, setIsRendering] = useState(false);
+  const containerRef = useRef(null);
 
   // Generate preview URL for the file
-  useState(() => {
+  useEffect(() => {
     if (file) {
-      const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+      // PDF or Image
+      if (file.type === 'application/pdf' || file.type.startsWith('image/')) {
+         const url = URL.createObjectURL(file);
+         setPreviewUrl(url);
+         return () => URL.revokeObjectURL(url);
+      }
       
-      // Cleanup
-      return () => URL.revokeObjectURL(url);
+      // DOCX Preview
+      if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+         setIsRendering(true);
+         setPreviewError(false);
+         
+         const reader = new FileReader();
+         reader.onload = async (e) => {
+           const buffer = e.target.result;
+           const container = document.getElementById('docx-container');
+           if (container) {
+             try {
+                // Clear previous content but keep loader if needed (though we handle isRendering)
+                container.innerHTML = ''; 
+                await renderAsync(buffer, container, null, {
+                  className: 'docx-viewer',
+                  inWrapper: false,
+                  ignoreWidth: false,
+                  ignoreHeight: false
+                });
+             } catch (err) {
+                console.error("DOCX Preview Error:", err);
+                setPreviewError(true);
+             } finally {
+                setIsRendering(false);
+             }
+           }
+         };
+         reader.readAsArrayBuffer(file);
+      }
     }
   }, [file]);
 
@@ -128,6 +162,16 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
                     className="w-full h-auto max-h-[600px] object-contain"
                     onError={() => setPreviewError(true)}
                   />
+                ) : file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? (
+                  <div className="h-[600px] bg-white overflow-auto p-4 custom-scrollbar" id="docx-container">
+                    {/* DOCX will be rendered here */}
+                    {isRendering && (
+                      <div className="flex h-full items-center justify-center">
+                        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+                        <span className="ml-2 text-gray-500">Memuat preview dokumen...</span>
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <div className="h-[600px] flex items-center justify-center text-gray-500">
                     <div className="text-center space-y-3">
@@ -139,7 +183,7 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
                 )}
                 
                 {previewError && (
-                  <div className="h-[600px] flex items-center justify-center">
+                  <div className="h-[600px] flex items-center justify-center absolute inset-0 bg-white">
                     <div className="text-center space-y-3">
                       <AlertCircle className="w-16 h-16 mx-auto text-orange-500" />
                       <p className="font-medium text-gray-700">Gagal memuat preview</p>
