@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { FileText, Check, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
-import { renderAsync } from 'docx-preview';
 
 const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,6 +29,9 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
            const container = document.getElementById('docx-container');
            if (container) {
              try {
+                // Dynamic import to avoid top-level crashes and reduce bundle size
+                const { renderAsync } = await import('docx-preview');
+                
                 // Clear previous content but keep loader if needed (though we handle isRendering)
                 container.innerHTML = ''; 
                 await renderAsync(buffer, container, null, {
