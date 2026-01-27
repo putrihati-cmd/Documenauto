@@ -7,7 +7,26 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [previewError, setPreviewError] = useState(false);
   const [isRendering, setIsRendering] = useState(false);
+  const [processingStep, setProcessingStep] = useState(0); // 0:Scan, 1:Understand, 2:Edit, 3:Done
   const containerRef = useRef(null);
+
+  // Simulation of AI Processing
+  useEffect(() => {
+    // Reset step when file changes
+    setProcessingStep(0);
+
+    const steps = [
+        { time: 2000, step: 1 }, // After 2s -> Understand
+        { time: 4500, step: 2 }, // After 4.5s -> Edit
+        { time: 7000, step: 3 }  // After 7s -> Done
+    ];
+
+    const timers = steps.map(({ time, step }) => 
+        setTimeout(() => setProcessingStep(step), time)
+    );
+
+    return () => timers.forEach(clearTimeout);
+  }, [file]);
 
   // Generate preview URL for the file
   useEffect(() => {
@@ -182,27 +201,79 @@ const PreviewViewer = ({ file, orderData, onSubmit, onBack }) => {
                     <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-green-50">
                         <h3 className="font-semibold text-green-800 flex items-center gap-2">
                             <Split className="w-4 h-4" />
-                            Hasil Akhir (Estimasi)
+                            {processingStep < 3 ? 'Sedang Menganalisa...' : 'Hasil Akhir (Estimasi)'}
                         </h3>
-                        <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
-                            {getServiceLabel(orderData.serviceLevel)}
-                        </span>
+                        {processingStep === 3 && (
+                            <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">
+                                {getServiceLabel(orderData.serviceLevel)}
+                            </span>
+                        )}
                     </div>
-                    <div className="p-8 text-center bg-white min-h-[200px] flex flex-col items-center justify-center">
-                         <div className="max-w-md mx-auto">
-                            <div className="flex justify-center gap-4 mb-4 opacity-50">
-                                <FileText className="w-12 h-12 text-gray-300" />
-                                <ArrowLeft className="w-8 h-8 text-gray-300 rotate-180" />
-                                <FileText className="w-12 h-12 text-green-500 border-2 border-green-200 rounded p-1" />
-                            </div>
-                            <h4 className="text-lg font-medium text-gray-800 mb-2">
-                                Formatting Otomatis akan diterapkan
-                            </h4>
-                            <p className="text-sm text-gray-500">
-                                Sistem kami akan merapikan margin, font, dan spasi dokumen Anda secara otomatis setelah order dikonfirmasi.
-                                Anda akan menerima notifikasi WhatsApp saat hasil sudah siap.
-                            </p>
-                         </div>
+                    
+                    <div className="p-8 text-center bg-white min-h-[300px] flex flex-col items-center justify-center relative">
+                         {processingStep === 0 && (
+                             <div className="animate-pulse space-y-4">
+                                 <div className="relative">
+                                    <FileText className="w-16 h-16 text-gray-300 mx-auto" />
+                                    <div className="absolute inset-0 flex items-center justify-center">
+                                        <div className="w-20 h-1 bg-blue-500 absolute top-1/2 left-1/2 -translate-x-1/2 animate-[scan_2s_ease-in-out_infinite]" />
+                                    </div>
+                                 </div>
+                                 <p className="text-blue-600 font-medium">Memindai isi dokumen...</p>
+                                 <p className="text-xs text-gray-400">Mendeteksi halaman, bab, dan sub-bab</p>
+                             </div>
+                         )}
+
+                         {processingStep === 1 && (
+                             <div className="space-y-4">
+                                 <div className="flex gap-2 justify-center">
+                                     <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce" />
+                                     <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce delay-100" />
+                                     <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce delay-200" />
+                                 </div>
+                                 <p className="text-purple-600 font-medium">Memahami struktur dokumen...</p>
+                                 <div className="text-xs text-left bg-gray-50 p-3 rounded border border-gray-100 w-64 mx-auto space-y-1 font-mono text-gray-500">
+                                     <p>✓ Margin detected</p>
+                                     <p>✓ Font: Times New Roman</p>
+                                     <p>✓ Spacing analysis...</p>
+                                 </div>
+                             </div>
+                         )}
+
+                         {processingStep === 2 && (
+                             <div className="space-y-4">
+                                 <Loader2 className="w-12 h-12 text-orange-500 animate-spin mx-auto" />
+                                 <p className="text-orange-600 font-medium">Menyiapkan skema perbaikan...</p>
+                                 <p className="text-xs text-gray-400">Mengkalkulasi biaya dan kebutuhan format</p>
+                             </div>
+                         )}
+
+                         {processingStep === 3 && (
+                             <div className="animate-in fade-in zoom-in duration-500">
+                                 <div className="max-w-md mx-auto">
+                                    <div className="flex justify-center gap-4 mb-4">
+                                        <div className="relative">
+                                            <FileText className="w-12 h-12 text-gray-300" />
+                                            <div className="absolute -bottom-1 -right-1 bg-red-100 text-red-600 text-[10px] px-1 rounded">Asli</div>
+                                        </div>
+                                        <ArrowLeft className="w-8 h-8 text-green-500 rotate-180 self-center" />
+                                        <div className="relative">
+                                            <FileText className="w-12 h-12 text-green-600 border-2 border-green-200 rounded p-1 shadow-green-100 shadow-lg" />
+                                            <div className="absolute bottom-0 right-0 bg-green-100 text-green-700 text-[10px] px-1 rounded-tl">Rapi</div>
+                                            <Check className="absolute -top-2 -right-2 w-5 h-5 bg-green-500 text-white rounded-full p-1" />
+                                        </div>
+                                    </div>
+                                    <h4 className="text-lg font-bold text-gray-800 mb-2">
+                                        Analisa Selesai!
+                                    </h4>
+                                    <p className="text-sm text-gray-600 bg-green-50 p-3 rounded-lg border border-green-100">
+                                        Dokumen Anda siap untuk di-<b>{getServiceLabel(orderData.serviceLevel)}</b>.
+                                        <br/>
+                                        Sistem kami akan otomatis memperbaiki margin, font, dan spasi sesuai standar akademik.
+                                    </p>
+                                 </div>
+                             </div>
+                         )}
                     </div>
                 </div>
             </ErrorBoundary>
