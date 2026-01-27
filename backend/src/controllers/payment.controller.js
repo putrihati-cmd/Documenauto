@@ -329,7 +329,7 @@ const verifyPayment = async (req, res) => {
 
     try {
         // Get payment order
-        const [orders] = await sequelize.query(
+        const orders = await sequelize.query(
             'SELECT * FROM payment_orders WHERE id = :id',
             { 
                 replacements: { id: order_id },
