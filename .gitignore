@@ -1,0 +1,11 @@
+node_modules/
+.env
+.DS_Store
+storage/
+__pycache__/
+*.pyc
+.venv/
+env/
+dist/
+coverage/
+smartcopy-pivot/

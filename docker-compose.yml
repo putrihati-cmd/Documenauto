@@ -97,20 +97,23 @@ services:
     volumes:
       - ./storage:/app/storage
 
-  whatsapp-bot:
-    build:
-      context: ./whatsapp-bot
-      dockerfile: Dockerfile
-    container_name: smartcopy-bot
-    restart: unless-stopped
-    environment:
-      - API_URL=http://backend:3001
-    depends_on:
-      - backend
-    networks:
-      - smartcopy-network
-    volumes:
-      - ./whatsapp-auth:/app/auth_info
+  # -----------------------------------------------------------------
+  # WHATSAPP BOT - DISABLED FOR WEB-BASED WORKFLOW
+  # -----------------------------------------------------------------
+  # whatsapp-bot:
+  #   build:
+  #     context: ./whatsapp-bot
+  #     dockerfile: Dockerfile
+  #   container_name: smartcopy-bot
+  #   restart: unless-stopped
+  #   environment:
+  #     - API_URL=http://backend:3001
+  #   depends_on:
+  #     - backend
+  #   networks:
+  #     - smartcopy-network
+  #   volumes:
+  #     - ./whatsapp-auth:/app/auth_info
 
 networks:
   smartcopy-network:

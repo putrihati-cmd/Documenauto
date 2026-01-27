@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { Sequelize } = require('sequelize');
 const redis = require('redis');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -10,6 +11,10 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Static files for uploaded documents (for development/testing)
+app.use('/uploads', express.static(path.join(__dirname, 'storage/uploads')));
 
 // Database Connection
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
@@ -21,9 +26,17 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 
-// Routes
+// Import routes
+const orderRoutes = require('./src/routes/order.routes');
+
+// Base routes
 app.get('/', (req, res) => {
-    res.json({ message: 'SmartCopy Backend is Running', status: 'online' });
+    res.json({ 
+        message: 'SmartCopy Backend API', 
+        status: 'online',
+        version: '2.0.0',
+        mode: 'web-workflow'
+    });
 });
 
 app.get('/health', async (req, res) => {
@@ -33,7 +46,8 @@ app.get('/health', async (req, res) => {
         res.json({
             status: 'healthy',
             db: 'connected',
-            redis: 'connected'
+            redis: 'connected',
+            timestamp: new Date().toISOString()
         });
     } catch (error) {
         res.status(500).json({
@@ -43,75 +57,67 @@ app.get('/health', async (req, res) => {
     }
 });
 
-const { exec } = require('child_process');
+// API routes
+app.use('/api', orderRoutes);
 
-// Webhook Router (For WAHA)
-app.post('/webhook', async (req, res) => {
-    const payload = req.body;
-    console.log('Webhook received:', JSON.stringify(payload, null, 2));
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Endpoint not found'
+    });
+});
 
-    // 1. Basic Validation
-    if (!payload || !payload.body) {
-        return res.status(200).send('No content');
+// Error handler
+app.use((error, req, res, next) => {
+    console.error('Server error:', error);
+    
+    // Handle multer errors
+    if (error.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({
+            success: false,
+            message: 'File size too large. Maximum size is 50MB.'
+        });
     }
-
-    const message = payload.body.toLowerCase();
-    const sender = payload.from;
-
-    console.log(`[Router] Msg from ${sender}: ${message}`);
-
-    // 2. Router Logic
-    try {
-        // CASE A: Dokumen Masuk (Ada Attachment)
-        if (payload.hasMedia) {
-             console.log('>> [SmartCopy] Document detected! Queuing for Python Worker...');
-             // Real implementation would download media here via WAHA API
-             // For MVP: We simulate triggering the worker if it's a known demo file
-             if (message.includes('skripsi')) {
-                 console.log('>> Triggering Style Applicator (Category: Skripsi)...');
-                 exec('python3 /app/processing-engine/style_applicator.py input.docx templates/skripsi/master.docx output.docx', (error, stdout, stderr) => {
-                     if (error) console.error(`Worker Error: ${error}`);
-                     else console.log(`Worker Result: ${stdout}`);
-                 });
-             }
-        } 
-        
-        // CASE B: Cek Member (Keyword)
-        else if (message.includes('cek poin') || message.includes('member')) {
-            console.log('>> [Router] Routing to MEMBER APP API...');
-            // axios.post('http://member-app/api/check', ...)
-        }
-        
-        // CASE C: Kasir (Keyword)
-        else if (message.includes('bayar') || message.includes('tagihan')) {
-            console.log('>> [Router] Routing to POS APP API...');
-        }
-
-        // CASE D: Default Auto-Reply
-        else {
-             console.log('>> [Bot] Sending default menu...');
-        }
-
-    } catch (err) {
-        console.error('Router Error:', err);
+    
+    if (error.message && error.message.includes('Invalid file type')) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
     }
-
-    res.status(200).send('OK');
+    
+    res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
 });
 
 // Start Server
 const start = async () => {
     try {
         await sequelize.authenticate();
-        console.log('Database connected.');
+        console.log('✓ Database connected');
+        
         await redisClient.connect();
-        console.log('Redis connected.');
+        console.log('✓ Redis connected');
 
         app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
+            console.log('');
+            console.log('═══════════════════════════════════════════');
+            console.log('  SmartCopy Backend API v2.0');
+            console.log('  Mode: Web-Based Workflow');
+            console.log('═══════════════════════════════════════════');
+            console.log(`  🚀 Server: http://localhost:${PORT}`);
+            console.log(`  📊 Health: http://localhost:${PORT}/health`);
+            console.log(`  📁 API: http://localhost:${PORT}/api`);
+            console.log('═══════════════════════════════════════════');
+            console.log('');
         });
     } catch (error) {
-        console.error('Unable to connect:', error);
+        console.error('❌ Unable to start server:', error);
+        process.exit(1);
     }
 };
 
