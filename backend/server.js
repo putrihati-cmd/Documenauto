@@ -29,6 +29,7 @@ redisClient.on('error', (err) => console.log('Redis Client Error', err));
 // Import routes
 const orderRoutes = require('./src/routes/order.routes');
 const templateRoutes = require('./src/routes/template.routes');
+const paymentRoutes = require('./src/routes/payment.routes');
 
 // Base routes
 app.get('/', (req, res) => {
@@ -61,6 +62,7 @@ app.get('/health', async (req, res) => {
 // API routes
 app.use('/api', orderRoutes);
 app.use('/api', templateRoutes);
+app.use('/api', paymentRoutes);
 
 // 404 handler
 app.use((req, res) => {

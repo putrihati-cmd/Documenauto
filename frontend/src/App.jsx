@@ -5,6 +5,8 @@ import UploadPage from './components/UploadPage';
 import OrderForm from './components/OrderForm';
 import PreviewViewer from './components/PreviewViewer';
 import TemplateManager from './components/admin/TemplateManager';
+import BuyTokens from './components/BuyTokens';
+import PaymentVerification from './components/admin/PaymentVerification';
 import { CheckCircle, Home } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3003/api';
@@ -126,7 +128,9 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<CustomerWorkflow />} />
+        <Route path="/buy-tokens" element={<BuyTokens />} />
         <Route path="/admin/templates" element={<TemplateManager />} />
+        <Route path="/admin/payments" element={<PaymentVerification />} />
       </Routes>
     </BrowserRouter>
   );
