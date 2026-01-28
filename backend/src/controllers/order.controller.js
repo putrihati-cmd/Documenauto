@@ -85,11 +85,12 @@ const createOrder = async (req, res) => {
     // 3. Create Database Order
     const [result] = await sequelize.query(
       `INSERT INTO orders 
-       (user_id, status, original_filename, file_path, document_type, tokens_required, tokens_spent, created_at, updated_at) 
-       VALUES (:uid, 'processing', :orig, :path, :type, :cost, :spent, NOW(), NOW()) 
+       (order_id, user_id, status, original_filename, file_path, document_type, tokens_required, tokens_spent, created_at, updated_at) 
+       VALUES (:ref, :uid, 'processing', :orig, :path, :type, :cost, :spent, NOW(), NOW()) 
        RETURNING id`,
       {
         replacements: {
+          ref: orderRef,
           uid: user_id,
           orig: req.file.originalname,
           path: req.file.path,
