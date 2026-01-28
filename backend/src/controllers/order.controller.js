@@ -44,114 +44,134 @@ const upload = multer({
   }
 });
 
+const { addToQueue } = require('../utils/queue');
+const { getTemplate } = require('./template.controller');
+const sequelize = require('../config/database');
+const { QueryTypes } = require('sequelize');
+
 // Create order controller
 const createOrder = async (req, res) => {
+  const t = await sequelize.transaction();
+  
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No file uploaded'
+      await t.rollback();
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    const { documentType, serviceLevel, copies, bindingType, colorMode, notes, templateId } = req.body;
+    const user_id = req.user?.id || 1; // Default to Test User
+    const TOKENS_COST = 1; // Fixed cost for now
+
+    // 1. Check User Balance & Lock Row
+    const [users] = await sequelize.query(
+      'SELECT token_balance FROM users WHERE id = :uid FOR UPDATE',
+      { replacements: { uid: user_id }, type: QueryTypes.SELECT, transaction: t }
+    );
+
+    if (!users || users.token_balance < TOKENS_COST) {
+      await t.rollback();
+      // Delete uploaded file to clean up
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(402).json({ 
+        success: false, 
+        message: 'Insufficient tokens. Please top up.' 
       });
     }
 
-    const {
-      documentType,
-      serviceLevel,
-      copies,
-      bindingType,
-      colorMode,
-      notes
-    } = req.body;
+    // 2. Generate Order IDs
+    const orderRef = 'ORD-' + Date.now();
 
-    // Validate required fields
-    if (!documentType || !serviceLevel) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields'
-      });
-    }
+    // 3. Create Database Order
+    const [result] = await sequelize.query(
+      `INSERT INTO orders 
+       (user_id, status, original_filename, file_path, document_type, tokens_required, tokens_spent, created_at, updated_at) 
+       VALUES (:uid, 'processing', :orig, :path, :type, :cost, :spent, NOW(), NOW()) 
+       RETURNING id`,
+      {
+        replacements: {
+          uid: user_id,
+          orig: req.file.originalname,
+          path: req.file.path,
+          type: documentType,
+          cost: TOKENS_COST,
+          spent: TOKENS_COST
+        },
+        type: QueryTypes.INSERT,
+        transaction: t
+      }
+    );
+    
+    // Sequelize INSERT with RETURNING returns [[{id: ...}]] for postgres sometimes, or [result, meta]
+    // Let's handle the array destructure safe way
+    const dbOrderId = result[0]?.id || result[0]; 
 
-    // Generate order ID
-    const orderId = 'ORD-' + Date.now();
+    // 4. Deduct Tokens
+    await sequelize.query(
+      'UPDATE users SET token_balance = token_balance - :cost, total_tokens_spent = total_tokens_spent + :cost WHERE id = :uid',
+      { replacements: { cost: TOKENS_COST, uid: user_id }, transaction: t }
+    );
 
-    // Create order object (in production, this would be saved to database)
-    const order = {
-      orderId,
-      status: 'PENDING_REVIEW',
-      file: {
-        originalName: req.file.originalname,
-        fileName: req.file.filename,
-        path: req.file.path,
-        size: req.file.size,
-        mimeType: req.file.mimetype
-      },
-      documentType,
-      serviceLevel,
-      copies: parseInt(copies) || 1,
-      bindingType,
-      colorMode: colorMode === 'true',
-      notes,
-      createdAt: new Date().toISOString()
-    };
+    // 5. Record Token Transaction
+    await sequelize.query(
+      `INSERT INTO token_transactions 
+       (user_id, amount, balance_before, balance_after, transaction_type, description, order_id, created_at)
+       VALUES 
+       (:uid, :amount, :bal_before, :bal_after, 'spend_format', :desc, :oid, NOW())`,
+       {
+         replacements: {
+           uid: user_id,
+           amount: -TOKENS_COST,
+           bal_before: users.token_balance,
+           bal_after: users.token_balance - TOKENS_COST,
+           desc: `Formatting Document ${orderRef}`,
+           oid: dbOrderId // Linking to the real integer ID in 'orders' table
+         },
+         transaction: t
+       }
+    );
 
-    // In production, save to database:
-    // const savedOrder = await Order.create(order);
+    await t.commit();
 
-const { addToQueue } = require('../utils/queue');
-const { getTemplate } = require('./template.controller'); // We need to import the template helper or logic
-const path = require('path');
-
-// ... (existing code)
-
-    // For now, log and return
-    console.log('New order created:', order);
+    console.log(`Order ${dbOrderId} created. Tokens deducted.`);
 
     // ---------------------------------------------------------
     // DISPATCH JOB TO PYTHON WORKER
     // ---------------------------------------------------------
-    // Determine the reference template path
-    let referencePath = documentType; // Default (if string)
-
-    // typically documentType from OrderForm is now "skripsi" or "makalah" OR a numeric ID
-    // We need to resolve the path if it's a specific ID
-    // For MVP: Assuming `documentType` holds the category or ID.
-
-    // Better Logic:
-    // If the OrderForm sends `templateId` (added recently), use that.
-    const templateId = req.body.templateId;
-    
-    // Construct absolute path for Docker volume
     const inputPath = `/app/storage/uploads/${req.file.filename}`;
-    const outputPath = `/app/storage/processed/${orderId}-formatted.docx`;
+    const outputPath = `/app/storage/processed/${orderRef}-formatted.docx`;
     
-    // Ensure output directory makes sense or is pre-created by worker
-    // Worker typically handles output creation.
-
     const jobPayload = {
-      id: orderId,
+      id: dbOrderId.toString(), // Use the DB Integer ID for consistency
+      orderRef: orderRef,       // Keep the string ref for filenames
       type: 'format',
       input: inputPath,
-      ref: templateId ? `TEMPLATE:${templateId}` : `CATEGORY:${documentType}`, // Worker needs to resolve this
-      output: outputPath
+      ref: templateId ? `TEMPLATE:${templateId}` : `CATEGORY:${documentType}`,
+      output: outputPath,
+      userId: user_id
     };
 
     await addToQueue(jobPayload);
     console.log(">> Job Dispatched to Redis:", jobPayload);
 
-
     return res.status(201).json({
       success: true,
       message: 'Order created successfully',
-      orderId: order.orderId,
+      orderId: orderRef,
+      dbId: dbOrderId,
       data: {
-        orderId: order.orderId,
-        status: order.status,
-        createdAt: order.createdAt
+        orderId: orderRef,
+        status: 'processing',
+        tokens_remaining: users.token_balance - TOKENS_COST
       }
     });
 
   } catch (error) {
+    await t.rollback();
     console.error('Error creating order:', error);
+    // Try to cleanup file
+    if (req.file) await fs.unlink(req.file.path).catch(() => {});
+    
     return res.status(500).json({
       success: false,
       message: 'Failed to create order',
