@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { CreditCard, Wallet, CheckCircle, Clock, Upload, X } from 'lucide-react';
 import axios from 'axios';
+import QRISPayment from './QRISPayment';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3003/api';
 
@@ -126,15 +127,23 @@ const BuyTokens = () => {
         )}
 
         {step === 'upload' && (
-          <UploadProof
-            paymentOrder={paymentOrder}
-            selectedMethod={selectedMethod}
-            proofFile={proofFile}
-            onFileSelect={setProofFile}
-            onUpload={handleUploadProof}
-            uploading={uploading}
-            onBack={() => setStep('payment')}
-          />
+          selectedMethod?.method_type === 'qris' ? (
+            <QRISPayment 
+              paymentOrder={paymentOrder}
+              methodData={selectedMethod}
+              onPaymentComplete={() => setStep('success')}
+            />
+          ) : (
+            <UploadProof
+              paymentOrder={paymentOrder}
+              selectedMethod={selectedMethod}
+              proofFile={proofFile}
+              onFileSelect={setProofFile}
+              onUpload={handleUploadProof}
+              uploading={uploading}
+              onBack={() => setStep('payment')}
+            />
+          )
         )}
 
         {step === 'success' && (
